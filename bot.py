@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 
 import aiosqlite
+from aiohttp import web
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
@@ -635,4 +636,60 @@ async def support_message(message: Message):
     )
 
 
-@dp.callback_query(F.data.start
+@dp.callback_query(F.data.startswith("reply:"))
+async def reply_start(call: CallbackQuery, state: FSMContext):
+    if not admin(call.from_user.id):
+        return
+
+    uid = int(call.data[6:])
+    await state.update_data(user_id=uid)
+    await state.set_state(AdminReply.user_id)
+    await call.message.answer(
+        f"💬 Напишите сообщение для пользователя <code>{uid}</code>."
+    )
+    await call.answer()
+
+
+@dp.message(AdminReply.user_id)
+async def reply_send(message: Message, state: FSMContext):
+    if not admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    uid = data["user_id"]
+
+    try:
+        await message.copy_to(
+            uid,
+            caption="💬 <b>Сообщение от администрации Clani Shop</b>"
+            if message.caption else None
+        )
+        await message.answer("✅ Ответ отправлен.", reply_markup=admin_keyboard())
+    except Exception:
+        await message.answer("❌ Не удалось доставить сообщение.")
+
+    await state.clear()
+
+
+async def health(request):
+    return web.Response(text="Clani Shop is running!")
+
+async def start_web():
+    app = web.Application()
+    app.router.add_get("/", health)
+    app.router.add_get("/health", health)
+
+    port = int(os.getenv("PORT", "10000"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Web server started on port {port}")
+
+async def main():
+    await init_db()
+    await start_web()
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
